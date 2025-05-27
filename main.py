@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
-import plotly.express as px
+from sklearn.preprocessing import StandardScaler
+import folium
+from streamlit_folium import st_folium
 
-st.title("📦 배송 데이터 군집 분석")
+st.title("📍 배송 위치 기반 군집 분석 (Folium 지도 시각화)")
 
 # 데이터 불러오기
 @st.cache_data
@@ -16,39 +17,42 @@ df = load_data()
 st.subheader("데이터 미리보기")
 st.dataframe(df)
 
-# 숫자형 변수 선택
-numeric_cols = df.select_dtypes(include='number').columns.tolist()
+# 위치 컬럼 지정
+lat_col = "Latitude"
+lon_col = "Longitude"
 
-# 사용자로부터 군집에 사용할 열 선택
-st.sidebar.header("군집 설정")
-selected_features = st.sidebar.multiselect("군집에 사용할 열 선택", numeric_cols, default=numeric_cols[:2])
+# 군집 수 선택
 n_clusters = st.sidebar.slider("군집 수 (K)", min_value=2, max_value=10, value=3)
 
-# 군집 분석 실행
-if len(selected_features) >= 2:
-    # 데이터 정규화
-    X = df[selected_features].dropna()
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+# 군집 실행
+loc_df = df[[lat_col, lon_col]].dropna()
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(loc_df)
 
-    # KMeans 모델 학습
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    labels = kmeans.fit_predict(X_scaled)
+kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+labels = kmeans.fit_predict(X_scaled)
+loc_df["Cluster"] = labels
 
-    # 결과를 데이터프레임에 추가
-    X_result = X.copy()
-    X_result["Cluster"] = labels
+# 중심 좌표 계산
+center_lat = loc_df[lat_col].mean()
+center_lon = loc_df[lon_col].mean()
 
-    # 시각화 (2D로만 지원)
-    if len(selected_features) >= 2:
-        fig = px.scatter(
-            X_result, 
-            x=selected_features[0], 
-            y=selected_features[1], 
-            color=X_result["Cluster"].astype(str),
-            title=f"KMeans 군집화 결과 (K={n_clusters})",
-            symbol="Cluster"
-        )
-        st.plotly_chart(fig)
-else:
-    st.warning("2개 이상의 숫자형 열을 선택하세요.")
+# Folium 지도 만들기
+m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
+
+cluster_colors = [
+    "red", "blue", "green", "purple", "orange", "darkred", "lightblue", "pink", "gray", "cadetblue"
+]
+
+for _, row in loc_df.iterrows():
+    folium.CircleMarker(
+        location=[row[lat_col], row[lon_col]],
+        radius=5,
+        color=cluster_colors[row["Cluster"] % len(cluster_colors)],
+        fill=True,
+        fill_opacity=0.7,
+        popup=f"Cluster {row['Cluster']}"
+    ).add_to(m)
+
+st.subheader("🌍 군집 결과 지도")
+st_folium(m, width=700, height=500)
